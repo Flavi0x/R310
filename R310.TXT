@@ -1,0 +1,214 @@
+## 1. INITIALISATION DE LA BASE DE DONNEES (Script SQL)
+
+Ce script permet de créer la structure de la base (DDL). Il respecte les contraintes d'intégrité (clés primaires et étrangères) et utilise un encodage moderne.
+
+```sql
+-- Suppression de la base si elle existe (Clean Install)
+DROP DATABASE IF EXISTS GestionStock;
+
+-- Création de la base en UTF8MB4 (Support universel de caractères)
+CREATE DATABASE GestionStock CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+USE GestionStock;
+
+-- 1. Table des catégories (Types de produits)
+CREATE TABLE typeProduit (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    nom VARCHAR(100) NOT NULL
+);
+
+-- 2. Table des produits (Table fille liée à typeProduit)
+CREATE TABLE produit (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    nom VARCHAR(100) NOT NULL,
+    stock INT NOT NULL DEFAULT 0,
+    prix DECIMAL(10,2) NOT NULL,
+    type_id INT,
+    -- Contrainte de clé étrangère
+    CONSTRAINT fk_produit_type FOREIGN KEY (type_id) REFERENCES typeProduit(id)
+);
+
+-- 3. Table des utilisateurs applicatifs (Optionnel pour l'exercice)
+CREATE TABLE User (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    login VARCHAR(50) NOT NULL UNIQUE,
+    password VARCHAR(255) NOT NULL,
+    role VARCHAR(50) DEFAULT 'user'
+);
+
+```
+
+---
+
+## 2. JEU DE DONNEES (Script d'insertion)
+
+Insertion de 5 catégories et 20 produits pour valider les tests de charge et les requêtes statistiques.
+
+```sql
+-- Insertion des Types
+INSERT INTO typeProduit (nom) VALUES 
+('Alimentation'), 
+('Périphérique'), 
+('Matériel portable'), 
+('Switch'), 
+('Câblage');
+
+-- Insertion des Produits (4 par catégorie)
+INSERT INTO produit (nom, stock, prix, type_id) VALUES 
+-- Catégorie Alimentation
+('Alim 500W', 10, 45.00, 1), ('Alim 750W Gold', 5, 89.99, 1), ('Chargeur USB-C', 50, 15.00, 1), ('Batterie Externe', 20, 25.00, 1),
+-- Catégorie Périphérique
+('Souris optique', 30, 12.50, 2), ('Clavier gamer', 15, 60.00, 2), ('Casque micro', 25, 35.00, 2), ('Webcam 1080p', 10, 50.00, 2),
+-- Catégorie Matériel portable
+('Laptop Pro 15', 5, 1200.00, 3), ('Ultrabook 13', 8, 950.00, 3), ('Tablette 10p', 12, 300.00, 3), ('Housse PC', 40, 20.00, 3),
+-- Catégorie Switch
+('Switch 5 ports', 20, 25.00, 4), ('Switch 24 ports', 5, 150.00, 4), ('Switch POE', 8, 200.00, 4), ('Routeur Wifi', 15, 80.00, 4),
+-- Catégorie Câblage
+('Cable RJ45 2m', 100, 5.00, 5), ('Cable HDMI', 50, 8.00, 5), ('Adaptateur VGA', 20, 10.00, 5), ('Fibre optique', 10, 45.00, 5);
+
+```
+
+---
+
+## 3. REQUETES METIER (Analyse de données)
+
+Ces requêtes démontrent la capacité à extraire des indicateurs clés de performance (KPI).
+
+**Requête 1 : Inventaire par catégorie (GROUP BY)**
+Permet de visualiser la répartition du catalogue.
+
+```sql
+SELECT t.nom AS Categorie, COUNT(p.id) AS Nombre_Produits
+FROM produit p
+JOIN typeProduit t ON p.type_id = t.id
+GROUP BY t.nom;
+
+```
+
+**Requête 2 : Valorisation du stock (Agrégation SUM)**
+Calcule la valeur financière totale des biens stockés.
+
+```sql
+SELECT SUM(prix * stock) AS Valeur_Totale_Stock FROM produit;
+
+```
+
+**Requête 3 : Produits Premium (Sous-requête MAX)**
+Identifie le produit le plus cher au sein de chaque catégorie.
+
+```sql
+SELECT t.nom AS Type, p.nom AS Produit, p.prix
+FROM produit p
+JOIN typeProduit t ON p.type_id = t.id
+WHERE p.prix = (
+    SELECT MAX(p2.prix) 
+    FROM produit p2 
+    WHERE p2.type_id = p.type_id
+);
+
+```
+
+---
+
+## 4. SECURITE ET GESTION DES DROITS
+
+Application du principe du "Moindre Privilège". Suppression des utilisateurs existants pour éviter les conflits avant la création.
+
+```sql
+-- Nettoyage préalable
+DROP USER IF EXISTS 'admin_app'@'localhost';
+DROP USER IF EXISTS 'lecteur'@'localhost';
+DROP USER IF EXISTS 'api_user'@'127.0.0.1';
+
+-- 1. Administrateur de l'application
+-- Accès complet mais local uniquement
+CREATE USER 'admin_app'@'localhost' IDENTIFIED BY 'AdminApp!2025';
+GRANT ALL PRIVILEGES ON GestionStock.* TO 'admin_app'@'localhost';
+
+-- 2. Profil Lecteur (Stagiaire / Audit)
+-- Accès en lecture seule
+CREATE USER 'lecteur'@'localhost' IDENTIFIED BY 'Lecteur?2025';
+GRANT SELECT ON GestionStock.* TO 'lecteur'@'localhost';
+
+-- 3. Profil API (Application)
+-- Accès restreint à l'IP locale 127.0.0.1
+-- Droit de modifier les données (DML) mais pas la structure (DDL)
+CREATE USER 'api_user'@'127.0.0.1' IDENTIFIED BY 'ApiUser#2025';
+GRANT SELECT, INSERT, UPDATE ON GestionStock.* TO 'api_user'@'127.0.0.1';
+
+-- Application des droits
+FLUSH PRIVILEGES;
+
+```
+
+---
+
+## 5. PROCEDURE DE TEST DE SECURITE
+
+Commandes à exécuter dans le terminal pour valider les droits lors de la présentation.
+
+### Test A : Profil Lecteur
+
+**Connexion :** `.\mysql.exe -u lecteur -p` (Mdp: `Lecteur?2025`)
+
+1. **Lecture :** `SELECT * FROM produit;` -> DOIT REUSSIR (Affichage de la liste).
+2. **Ecriture :** `INSERT INTO produit (nom, stock, prix, type_id) VALUES ('Test', 0, 0, 1);` -> DOIT ECHOUER (Message attendu : ERROR 1142 ... command denied).
+
+### Test B : Profil API
+
+**Connexion :** `.\mysql.exe -u api_user -p -h 127.0.0.1` (Mdp: `ApiUser#2025`)
+
+1. **Mise à jour :** `UPDATE produit SET stock = 50 WHERE nom = 'Souris optique';` -> DOIT REUSSIR (Query OK).
+2. **Modification structure :** `ALTER TABLE produit ADD COLUMN test INT;` -> DOIT ECHOUER (Message attendu : ERROR 1142 ... command denied).
+
+---
+
+## 6. EXPLOITATION : SAUVEGARDE ET RESTAURATION (PRA)
+
+Procédure de Plan de Reprise d'Activité en cas d'incident majeur. Les commandes sont adaptées pour PowerShell sous Windows.
+
+**1. Sauvegarde (Backup)**
+Exécuté par l'administrateur système.
+
+```powershell
+.\mysqldump.exe -u admin_app -p GestionStock > backup_final.sql
+
+```
+
+**2. Simulation d'incident (Sabotage)**
+Suppression volontaire d'une table critique.
+
+```sql
+USE GestionStock;
+DROP TABLE produit;
+
+```
+
+**3. Restauration**
+Réinjection du fichier SQL via un Pipe (spécifique PowerShell).
+
+```powershell
+Get-Content backup_final.sql | .\mysql.exe -u admin_app -p GestionStock
+
+```
+
+**4. Vérification**
+Contrôle que les données sont rétablies.
+
+```sql
+SELECT COUNT(*) FROM produit; 
+-- Résultat attendu : 20
+
+```
+
+---
+
+## 7. ARGUMENTAIRE THEORIQUE (FAQ ORAL)
+
+**Pourquoi ne pas utiliser le compte 'root' pour l'application ?**
+L'utilisation de root pose un risque de sécurité majeur. Si l'application est compromise, l'attaquant obtient le contrôle total du serveur de base de données (suppression de toutes les bases, création d'utilisateurs, etc.). Un compte dédié limite la casse à la seule base concernée.
+
+**Pourquoi restreindre les privilèges (ex: lecteur) ?**
+C'est le principe du moindre privilège. Un utilisateur ne doit avoir que les droits strictement nécessaires à sa fonction. Cela évite les erreurs humaines (suppression accidentelle par un stagiaire) et limite l'impact d'une usurpation d'identité.
+
+**Pourquoi restreindre la connexion par IP (127.0.0.1) ?**
+Cela réduit la surface d'attaque réseau. Si le mot de passe de l'utilisateur API est volé, il ne pourra pas être utilisé depuis un ordinateur distant (Internet ou réseau local). L'attaquant devrait obligatoirement avoir pris le contrôle du serveur lui-même pour utiliser ce compte.
